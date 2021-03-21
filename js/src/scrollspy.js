@@ -23,13 +23,13 @@ const EVENT_KEY = `.${DATA_KEY}`
 const DATA_API_KEY = '.data-api'
 
 const Default = {
-  offset: 10,
-  target: ''
+  target: null,
+  rootMargin: '10px 0px 10px 0px'
 }
 
 const DefaultType = {
-  offset: 'number',
-  target: '(string|element)'
+  target: '(string|element)',
+  rootMargin: '(string)'
 }
 
 const EVENT_ACTIVATE = `activate${EVENT_KEY}`
@@ -54,8 +54,21 @@ const SELECTOR_DROPDOWN_TOGGLE = '.dropdown-toggle'
 class ScrollSpy extends BaseComponent {
   constructor(element, config) {
     super(element)
+
+    // this._element is  the observablesContainer
     this._config = this._getConfig(config)
     this._targetsContainer = this._config.target
+
+    if (!isElement(this._targetsContainer)) {
+      throw new TypeError('Bootstrap\'s tooltips require Popper (https://popper.js.org)')
+      // this.dispose()
+      // return
+    }
+
+    this._targets = []
+    this._activeTarget = null
+    this._observableSections = []
+    this._observer = null
     this.refresh() // initialize
   }
 
@@ -72,12 +85,14 @@ class ScrollSpy extends BaseComponent {
   // Public
 
   refresh() {
+    // `${SELECTOR_NAV_LINKS}, ${SELECTOR_LIST_ITEMS}, .${CLASS_NAME_DROPDOWN_ITEM}`
     this._targets = SelectorEngine
-      .find(`${SELECTOR_NAV_LINKS}, ${SELECTOR_LIST_ITEMS}, .${CLASS_NAME_DROPDOWN_ITEM}`, this._targetsContainer)
-      .filter(el => el.hash.length > 0)
+      .find('[href]', this._targetsContainer)
+      .filter(el => el.hash.length > 0)// ensure that all have id
 
-    this._activate(this._targets.shift())// activate first target
-    this._observableSections = this._targets.map(el => SelectorEngine.findOne(el.hash, this._element))
+    this._observableSections = this._targets
+      .map(el => SelectorEngine.findOne(el.hash, this._element))
+      .filter(el => el)// filter nulls
 
     if (this._observer) {
       this._observer.disconnect()
@@ -90,7 +105,6 @@ class ScrollSpy extends BaseComponent {
 
   dispose() {
     super.dispose()
-
     this._config = null
     this._targetsContainer = null
     this._targets = []
@@ -123,16 +137,16 @@ class ScrollSpy extends BaseComponent {
   }
 
   _activate(target) {
-    if (this._activeTarget === target) {
+    if (!target || this._activeTarget === target) {
       return
     }
 
     this._activeTarget = target
-    this._clear()
+    this._clearActiveClass()
 
     target.classList.add(CLASS_NAME_ACTIVE)
 
-    if (target.classList.contains(CLASS_NAME_DROPDOWN_ITEM)) {
+    if (target.classList.contains(CLASS_NAME_DROPDOWN_ITEM)) { // Activate dropdown parents
       SelectorEngine.findOne(SELECTOR_DROPDOWN_TOGGLE, target.closest(SELECTOR_DROPDOWN))
         .classList.add(CLASS_NAME_ACTIVE)
     } else {
@@ -143,7 +157,7 @@ class ScrollSpy extends BaseComponent {
           SelectorEngine.prev(listGroup, `${SELECTOR_NAV_LINKS}, ${SELECTOR_LIST_ITEMS}`)
             .forEach(item => item.classList.add(CLASS_NAME_ACTIVE))
 
-          // // Handle special case when .nav-link is inside .nav-item
+          // Handle special case when .nav-link is inside .nav-item
           // SelectorEngine.prev(listGroup, SELECTOR_NAV_ITEMS)
           //   .forEach(navItem => {
           //     SelectorEngine.children(navItem, SELECTOR_NAV_LINKS)
@@ -157,27 +171,31 @@ class ScrollSpy extends BaseComponent {
     })
   }
 
-  _clear() {
+  _clearActiveClass() {
     SelectorEngine.find(`.${CLASS_NAME_ACTIVE}`, this._targetsContainer)
       .forEach(node => node.classList.remove(CLASS_NAME_ACTIVE))
   }
 
   _getNewObserver() {
-    return new IntersectionObserver(entries => {
-      const entry = entries.find(entry => entry.intersectionRatio)
-      // const entry = entries
-      //   .filter(el => el.isIntersecting)
-      //   .sort((a, b) => (a.intersectionRect.top - b.intersectionRect.top))
-      //   .shift()
-      // entries.forEach(b => console.log(b.intersectionRatio))
+    const callback = entries => {
+      const entry = entries
+        .filter(el => el.isIntersecting)
+        .sort((a, b) => (a.intersectionRect.height - b.intersectionRect.height))
+        .pop()
+      // eslint-disable-next-line no-console
+      console.log(entries, entry)
       if (entry) {
         this._activate(this._targets.find(el => el.hash === `#${entry.target.id}`))
       }
-    }, {
+    }
+
+    const options = {
       root: this._element,
-      rootMargin: '0px',
-      threshold: 0
-    })
+      threshold: 0,
+      rootMargin: this._config.rootMargin
+    }
+
+    return new IntersectionObserver(callback.bind(this), options)
   }
 
   // Static
@@ -190,7 +208,7 @@ class ScrollSpy extends BaseComponent {
         return
       }
 
-      if (typeof data[config] === 'undefined') {
+      if (data[config] === undefined || config.startsWith('_') || config === 'constructor') {
         throw new TypeError(`No method named "${config}"`)
       }
 
